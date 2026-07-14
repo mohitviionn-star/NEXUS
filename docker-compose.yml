@@ -1,0 +1,21 @@
+# Lists the "boxes" (containers) NEXUS needs to run locally.
+# Start them all with: docker compose up -d
+services:
+  # Our database box - remembers services, incidents, etc. permanently.
+  postgres:
+    image: postgres:16 # ready-made Postgres, version 16
+    restart: unless-stopped # auto-restart it if it crashes or the computer reboots
+    environment: # first-time setup: username, password, database name
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: nexus_dev_password
+      POSTGRES_DB: nexus
+    ports:
+      # Using 5433 on our side (left number) because this Windows machine
+      # already has a separate, real Postgres installed using door 5432.
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # keep data on disk, not just inside the box
+
+# Named storage that survives even if the container is deleted and recreated.
+volumes:
+  postgres_data:
