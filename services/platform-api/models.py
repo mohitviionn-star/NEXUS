@@ -58,3 +58,14 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255))  # the scrambled password, never the real one
     role: Mapped[str] = mapped_column(String(30), default="engineer")  # viewer, engineer, incident_commander, admin
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    token: Mapped[str] = mapped_column(String(255), unique=True)  # the long random "receipt" string
+    revoked: Mapped[bool] = mapped_column(default=False)  # cancelled - can never be used again
+    expires_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

@@ -18,8 +18,6 @@ type IncidentRecord = {
   resolved_at: string | null
 }
 
-const API_BASE = 'http://localhost:8000'
-
 const badgeStyles: Record<string, string> = {
   healthy: 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30',
   unhealthy: 'bg-red-500/15 text-red-400 ring-1 ring-red-500/30',
@@ -45,7 +43,7 @@ function formatTimestamp(value: string) {
 }
 
 export default function DashboardPage() {
-  const { token, logout } = useAuth()
+  const { authFetch, logout } = useAuth()
   const [services, setServices] = useState<ServiceRecord[]>([])
   const [incidents, setIncidents] = useState<IncidentRecord[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -53,28 +51,25 @@ export default function DashboardPage() {
   useEffect(() => {
     const load = async () => {
       try {
+        // authFetch automatically refreshes an expired access token and
+        // retries once - we only end up here if that also failed.
         const [servicesRes, incidentsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/v1/services`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${API_BASE}/api/v1/incidents`, { headers: { Authorization: `Bearer ${token}` } }),
+          authFetch('/api/v1/services'),
+          authFetch('/api/v1/incidents'),
         ])
-
-        if (servicesRes.status === 401 || incidentsRes.status === 401) {
-          logout() // token expired or invalid - send back to login
-          return
-        }
 
         setServices(await servicesRes.json())
         setIncidents(await incidentsRes.json())
         setError(null)
       } catch {
-        setError('Could not reach the backend.')
+        logout() // refresh token was also invalid/expired - back to login
       }
     }
 
     load()
     const interval = setInterval(load, 3000)
     return () => clearInterval(interval)
-  }, [token, logout])
+  }, [authFetch, logout])
 
   const openIncidents = incidents.filter((incident) => incident.status === 'open')
 
