@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_session
 from models import Incident, Service, User
 from datetime import datetime
-from auth import hash_password, verify_password, create_access_token
+from auth import hash_password, verify_password, create_access_token, get_current_user
 
 
 
@@ -45,9 +45,13 @@ class ServiceOut(ServiceIn):
         from_attributes = True  # allows building this straight from a Service row
 
 
-# Register a new service in the database.
+# Register a new service in the database. Requires being logged in.
 @app.post("/api/v1/services", response_model=ServiceOut)
-async def create_service(payload: ServiceIn, session: AsyncSession = Depends(get_session)):
+async def create_service(
+    payload: ServiceIn,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
     service = Service(
         name=payload.name,
         slug=payload.slug,
@@ -60,9 +64,12 @@ async def create_service(payload: ServiceIn, session: AsyncSession = Depends(get
     return service
 
 
-# List every service that's been registered.
+# List every service that's been registered. Requires being logged in.
 @app.get("/api/v1/services", response_model=list[ServiceOut])
-async def list_services(session: AsyncSession = Depends(get_session)):
+async def list_services(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
     result = await session.execute(select(Service))
     return result.scalars().all()
     
@@ -80,9 +87,12 @@ class IncidentOut(BaseModel):
         from_attributes = True
 
 
-# List every incident, newest first.
+# List every incident, newest first. Requires being logged in.
 @app.get("/api/v1/incidents", response_model=list[IncidentOut])
-async def list_incidents(session: AsyncSession = Depends(get_session)):
+async def list_incidents(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
     result = await session.execute(select(Incident).order_by(Incident.opened_at.desc()))
     return result.scalars().all()
 
