@@ -1,12 +1,14 @@
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
-from models import Incident, Service
+from models import Incident, Service, User
 from datetime import datetime
+from auth import hash_password, verify_password, create_access_token
+
 
 
 
@@ -83,3 +85,44 @@ class IncidentOut(BaseModel):
 async def list_incidents(session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(Incident).order_by(Incident.opened_at.desc()))
     return result.scalars().all()
+
+
+
+class RegisterIn(BaseModel):
+    email: str
+    password: str
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@app.post("/api/v1/auth/register", status_code=201)
+async def register(payload: RegisterIn, session: AsyncSession = Depends(get_session)):
+    existing = await session.execute(select(User).where(User.email == payload.email))
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(email=payload.email, hashed_password=hash_password(payload.password))
+    session.add(user)
+    await session.commit()
+    return {"message": "Registered successfully"}
+
+
+@app.post("/api/v1/auth/login", response_model=TokenOut)
+async def login(payload: LoginIn, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+
+    # Same error either way - don't reveal whether the email exists.
+    if user is None or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = create_access_token(user.id, user.role)
+    return TokenOut(access_token=token)

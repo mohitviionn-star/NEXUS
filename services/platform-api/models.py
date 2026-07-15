@@ -49,3 +49,12 @@ class IncidentEvent(Base):
     event_type: Mapped[str] = mapped_column(String(30))  # "opened" or "resolved"
     message: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True)  # no two users can share an email
+    hashed_password: Mapped[str] = mapped_column(String(255))  # the scrambled password, never the real one
+    role: Mapped[str] = mapped_column(String(30), default="engineer")  # viewer, engineer, incident_commander, admin
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
