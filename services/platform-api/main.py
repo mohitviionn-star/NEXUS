@@ -5,7 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
-from models import Service
+from models import Incident, Service
+from datetime import datetime
+
+
 
 app = FastAPI()
 
@@ -59,4 +62,24 @@ async def create_service(payload: ServiceIn, session: AsyncSession = Depends(get
 @app.get("/api/v1/services", response_model=list[ServiceOut])
 async def list_services(session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(Service))
+    return result.scalars().all()
+    
+
+# Shape for showing an incident back to whoever asks.
+class IncidentOut(BaseModel):
+    id: int
+    service_id: int
+    severity: str
+    status: str
+    opened_at: datetime
+    resolved_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+# List every incident, newest first.
+@app.get("/api/v1/incidents", response_model=list[IncidentOut])
+async def list_incidents(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Incident).order_by(Incident.opened_at.desc()))
     return result.scalars().all()
