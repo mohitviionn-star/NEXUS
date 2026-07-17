@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
-from models import Incident, RefreshToken, Service, User
+from models import Incident, Organization, OrganizationMember, RefreshToken, Service, User
+
 from datetime import datetime
 from auth import (
     hash_password,
@@ -14,8 +15,11 @@ from auth import (
     get_current_user,
     issue_refresh_token,
     use_refresh_token,
-    REFRESH_TOKEN_TTL_DAYS
+    REFRESH_TOKEN_TTL_DAYS,
+    CurrentUser,
 )
+import secrets
+
 
 
 
@@ -54,18 +58,23 @@ class ServiceOut(ServiceIn):
         from_attributes = True  # allows building this straight from a Service row
 
 
-# Register a new service in the database. Requires being logged in.
+# Register a new service in the database. Requires being logged in as an
+# admin - a good example of a "sensitive action" restricted by role.
 @app.post("/api/v1/services", response_model=ServiceOut)
 async def create_service(
     payload: ServiceIn,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current: CurrentUser = Depends(get_current_user),
 ):
+    if current.role != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin can register services")
+
     service = Service(
         name=payload.name,
         slug=payload.slug,
         health_check_url=payload.health_check_url,
         status="unknown",
+        organization_id=current.organization_id,
     )
     session.add(service)
     await session.commit()
@@ -73,13 +82,15 @@ async def create_service(
     return service
 
 
-# List every service that's been registered. Requires being logged in.
+# List every service in MY organization only - tenant isolation in action.
 @app.get("/api/v1/services", response_model=list[ServiceOut])
 async def list_services(
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current: CurrentUser = Depends(get_current_user),
 ):
-    result = await session.execute(select(Service))
+    result = await session.execute(
+        select(Service).where(Service.organization_id == current.organization_id)
+    )
     return result.scalars().all()
     
 
@@ -96,13 +107,20 @@ class IncidentOut(BaseModel):
         from_attributes = True
 
 
-# List every incident, newest first. Requires being logged in.
+# List every incident in MY organization only, newest first. An incident
+# doesn't store organization_id directly - we get there by joining through
+# the service it belongs to.
 @app.get("/api/v1/incidents", response_model=list[IncidentOut])
 async def list_incidents(
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current: CurrentUser = Depends(get_current_user),
 ):
-    result = await session.execute(select(Incident).order_by(Incident.opened_at.desc()))
+    result = await session.execute(
+        select(Incident)
+        .join(Service, Incident.service_id == Service.id)
+        .where(Service.organization_id == current.organization_id)
+        .order_by(Incident.opened_at.desc())
+    )
     return result.scalars().all()
 
 
@@ -110,6 +128,7 @@ async def list_incidents(
 class RegisterIn(BaseModel):
     email: str
     password: str
+    organization_name: str
 
 
 class LoginIn(BaseModel):
@@ -134,6 +153,16 @@ async def register(payload: RegisterIn, session: AsyncSession = Depends(get_sess
 
     user = User(email=payload.email, hashed_password=hash_password(payload.password))
     session.add(user)
+    await session.flush()  # fills in user.id before we use it below
+
+    # The first person to register for a new company becomes its admin -
+    # a random suffix keeps the slug unique even if two companies share a name.
+    slug = payload.organization_name.lower().replace(" ", "-") + "-" + secrets.token_hex(3)
+    organization = Organization(name=payload.organization_name, slug=slug)
+    session.add(organization)
+    await session.flush()  # fills in organization.id before we use it below
+
+    session.add(OrganizationMember(organization_id=organization.id, user_id=user.id, role="admin"))
     await session.commit()
     return {"message": "Registered successfully"}
 
@@ -147,7 +176,14 @@ async def login(payload: LoginIn, response: Response, session: AsyncSession = De
     if user is None or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    access_token = create_access_token(user.id, user.role)
+    membership_result = await session.execute(
+        select(OrganizationMember).where(OrganizationMember.user_id == user.id)
+    )
+    membership = membership_result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=403, detail="User does not belong to an organization")
+
+    access_token = create_access_token(user.id, membership.organization_id, membership.role)
     refresh_token = await issue_refresh_token(session, user.id)
     await session.commit()
 
@@ -183,8 +219,15 @@ async def refresh(
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
+    membership_result = await session.execute(
+        select(OrganizationMember).where(OrganizationMember.user_id == user.id)
+    )
+    membership = membership_result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=403, detail="User does not belong to an organization")
+
     old_token.revoked = True
-    access_token = create_access_token(user.id, user.role)
+    access_token = create_access_token(user.id, membership.organization_id, membership.role)
     new_refresh_token = await issue_refresh_token(session, user.id)
     await session.commit()
 

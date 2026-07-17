@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../AuthContext";
 
 export default function LoginPage() {
@@ -85,6 +85,13 @@ export default function LoginPage() {
         >
           {loading ? "Signing in..." : "Sign in"}
         </button>
+
+        <p className="mt-4 text-center text-sm text-slate-400">
+          Need an account?{" "}
+          <Link to="/register" className="text-indigo-400 hover:underline">
+            Create one
+          </Link>
+        </p>
       </form>
     </div>
   );

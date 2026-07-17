@@ -31,28 +31,46 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
-def create_access_token(user_id: int, role: str) -> str:
+def create_access_token(user_id: int, organization_id: int, role: str) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_TTL_MINUTES)
-    payload = {"sub": str(user_id), "role": role, "exp": expires_at}
+    payload = {
+        "sub": str(user_id),
+        "org_id": organization_id,
+        "role": role,
+        "exp": expires_at,
+    }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 from fastapi import Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
 from models import RefreshToken, User
 
-# Tells FastAPI's /docs page how to collect a token from the user (the "Authorize" button).
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+# Tells FastAPI's /docs page to show a simple "paste your token" box for the
+# Authorize button - we're just checking a bearer token, not implementing
+# the full OAuth2 password-grant handshake.
+bearer_scheme = HTTPBearer()
+
+
+class CurrentUser:
+    """Everything an endpoint needs to know about who's making the request -
+    the user themselves, plus which organization and role apply right now."""
+
+    def __init__(self, user: User, organization_id: int, role: str):
+        self.user = user
+        self.organization_id = organization_id
+        self.role = role
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     session: AsyncSession = Depends(get_session),
-) -> User:
+) -> CurrentUser:
+    token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.PyJWTError:
@@ -65,7 +83,7 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    return user
+    return CurrentUser(user=user, organization_id=payload["org_id"], role=payload["role"])
 
 
 async def issue_refresh_token(session: AsyncSession, user_id: int) -> str:

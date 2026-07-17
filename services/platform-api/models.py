@@ -19,6 +19,9 @@ class Service(Base):
     status: Mapped[str] = mapped_column(String(20), default="unknown")  # last known state
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
     consecutive_successes: Mapped[int] = mapped_column(Integer, default=0)
+    # Nullable for now so it doesn't break existing rows created before
+    # organizations existed - new rows always get one set by the app.
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id"), nullable=True)
 
 class HealthCheck(Base):
     __tablename__ = "health_checks"
@@ -68,4 +71,22 @@ class RefreshToken(Base):
     token: Mapped[str] = mapped_column(String(255), unique=True)  # the long random "receipt" string
     revoked: Mapped[bool] = mapped_column(default=False)  # cancelled - can never be used again
     expires_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(150))
+    slug: Mapped[str] = mapped_column(String(150), unique=True)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+class OrganizationMember(Base):
+    __tablename__ = "organization_members"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    role: Mapped[str] = mapped_column(String(30), default="engineer")  # viewer, engineer, incident_commander, admin
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
